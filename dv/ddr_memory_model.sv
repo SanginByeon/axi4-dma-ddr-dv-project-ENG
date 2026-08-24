@@ -3,6 +3,7 @@
 //
 // - Verification memory model that responds to DMA-controller AXI4 read/write requests.
 // - Provides 1,024 x 32-bit memory and fixed read latency.
+// - Removes the previous memory-pattern initialization for UVM; sequences preload source data.
 // - Does not model actual DDR-controller or PHY behavior.
 // - Renames the baseline ddr_controller for its role and separates it into its own file.
 // ============================================================================
@@ -41,10 +42,6 @@ module ddr_memory_model (axi4_if.slave axi); 	// Uses the interface as a slave
   
 	always_ff @(posedge axi.aclk or negedge axi.aresetn) begin // Clock/reset
       	if (!axi.aresetn) begin 				// Asynchronous reset
-          	for (int i=0; i<64; i++) 
-				mem[i] <= 32'hCAFE_0000 + i; 	// Initial pattern
-			for (int j=64; j<1024; j++)
-              	mem[j] <= 32'h0; 				// Remaining locations = 0
 			rd_active <= 1'b0; rd_addr <= '0; rd_len <= '0; rd_cnt <= '0; rd_lat <= '0; rd_id_reg <= '0; // Initialize RD
 			wr_active <= 1'b0; wr_addr <= '0; wr_len <= '0; wr_cnt <= '0; wr_id_reg <= '0; 				 // Initialize WR
 			axi.rvalid <= 1'b0; axi.rlast <= 1'b0; axi.rid <= '0; axi.rdata <= '0; 						 // Initialize R channel
