@@ -4,7 +4,8 @@
 // - Performs memory copies according to MMIO-configured SRC, DST, and SIZE values.
 // - Stores AXI4 read-burst data in an internal FIFO before transmitting it in write bursts.
 // - Provides transfer status and error information through MMIO registers and interrupts.
-// - Extracted from the baseline in Step 1 without behavior changes.
+// - Extracted from the baseline in Step 1. Step 3 fixes keep the W payload stable during stalls,
+//   limit FIFO prefetch to the current burst, and handle BRESP errors.
 // ============================================================================
 
 module dma_controller (
@@ -262,8 +263,10 @@ module dma_controller (
                       	m.wlast <= (w_beats_sent == burst_len_m1); // Whether final
 					end
                   	else if (m.wvalid) begin 						// Transfer in progress
-                      	m.wdata <= wdata_hold; 						// Output held data
-                    	m.wlast <= (w_beats_sent == burst_len_m1); 	// Whether final
+						if (m.wready) begin 							// Output next beat only on a handshake
+							m.wdata <= wdata_hold; 					// Output held data
+							m.wlast <= (w_beats_sent == burst_len_m1); // Indicates the final beat
+						end
 					end
 					else begin
 						m.wlast <= 1'b0; 							// last=0 while idle
@@ -275,7 +278,7 @@ module dma_controller (
                       	cur_dst <= cur_dst + 4; 			// Increment destination address
 						w_beats_sent <= w_beats_sent + 1; 	// Increment transmit count
                       
-                      	if (w_beats_sent != burst_len_m1) 	// Before the final beat
+						if ((w_beats_sent + 1) < burst_len_m1) // When subsequent prefetch is required
                         	wdata_hold <= fifo[rd_ptr + 2]; // Prefetch the data after next
                       
                       	if (w_beats_sent == burst_len_m1) 	// Immediately after final beat
@@ -364,8 +367,8 @@ module dma_controller (
               	nxt = S_WR_RESP; 	// Final write beat → RESP
           
 			S_WR_RESP: if (m.bvalid && m.bready) begin
-				if (stat.error)
-                  	nxt = S_ERROR; 	// Error → ERROR
+				if (m.bresp != 2'b00)
+					nxt = S_ERROR; 	// BRESP error → ERROR
 				else if (bytes_left>0)
                   	nxt = S_NEXT; 	// Remaining data → NEXT
 				else

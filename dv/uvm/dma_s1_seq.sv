@@ -1,8 +1,8 @@
 // ============================================================================
 // dma_s1_seq.sv - DMA Scenario 1 Sequence
 //
-// - Performs a 256-byte basic copy using 4-byte-aligned addresses.
-// - Generates a transaction for checking normal transfer flow and completion indication.
+// - Performs a 256-byte basic copy at 4-byte-aligned addresses without backpressure or error injection.
+// - Generates the reference transaction used to compare backpressure and error-injection scenarios.
 // ============================================================================
 
 import utility_pkg::*;
@@ -31,12 +31,16 @@ class dma_s1_seq extends dma_base_seq;
             enable == 1'b1;
             start  == 1'b1;
             irq    == 1'b1;
+
+            // DDR memory-model verification controls
+            backpressure_prob == 0;
+            error_inject      == 1'b0;
         }) begin
             `uvm_fatal("S1_SEQ", "Failed to randomize dma_tx in dma_s1_seq")
         end
 
         // Set scenario name
-        t.scenario_name = "256B Basic copy (S1)";
+        t.scenario_name = "256B Basic Copy (S1)";
 
         // Initialize source memory with the 32'hCAFE_0000-based pattern
         preload_src_mem(t.src_addr, t.data_payload);

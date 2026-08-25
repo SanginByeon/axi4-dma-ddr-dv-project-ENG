@@ -1,9 +1,9 @@
 // ============================================================================
 // testbench.sv - DMA-DDR UVM Testbench Top
 //
-// - Connects the DMA controller, DDR memory model, and AXI4/MMIO interfaces.
+// - Connects the DMA controller, DDR memory model, and AXI4/MMIO/DDR-model interfaces.
 // - Passes virtual interfaces to the UVM environment and runs dma_test.
-// - Reproduces the baseline normal-transfer scenarios with equivalent UVM sequences.
+// - Runs baseline-transfer, W-channel backpressure, and BRESP error-injection scenarios.
 // - Verifies complete transfer-region data integrity with a transaction-based Scoreboard.
 // - Reports functional coverage and performance results in the UVM report phase.
 // - Provides verbosity-controlled UVM logs for DMA states and AXI activity.
@@ -59,9 +59,13 @@ module tb;
     // [MMIO connectivity]
     mmio_if mmio(.clk(clk));
 
+    // [DDR memory-model control] : Pass backpressure and BRESP-error settings from the UVM environment
+    ddr_model_if ddr_model_ctrl(.aclk(clk), .aresetn(resetn));
+
     // [DDR memory model] : Operates as an AXI slave
     ddr_memory_model ddr_model (
-        .axi(memory_axi.slave)
+        .axi     (memory_axi.slave),
+        .ddr_cfg (ddr_model_ctrl)
     );
 
     // [DMA controller] : Accesses memory as an AXI master
@@ -92,6 +96,9 @@ module tb;
         );
         uvm_config_db #(virtual axi4_if)::set(
             null, "*", "aif", memory_axi
+        );
+        uvm_config_db #(virtual ddr_model_if)::set(
+            null, "*", "dif", ddr_model_ctrl
         );
 
         run_test("dma_test");

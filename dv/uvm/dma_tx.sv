@@ -1,7 +1,7 @@
 // ============================================================================
 // dma_tx.sv - DMA Transaction
 //
-// - Defines the DMA source/destination addresses, transfer size, and CTRL settings as a sequence item.
+// - Defines DMA source/destination addresses, transfer size, CTRL, and DDR-model verification settings.
 // - Generates a source-memory preload payload pattern matching the transfer size.
 // - Constrains 4-byte address alignment, the 4 KB memory range, and source/destination non-overlap.
 // - Provides factory registration, normal-transfer defaults, and transaction formatting.
@@ -18,6 +18,12 @@ class dma_tx extends uvm_sequence_item;
     rand bit start;
     rand bit irq;
 
+    // Probability of AXI4 W-channel backpressure in the DDR memory model
+    rand bit [7:0] backpressure_prob;
+
+    // DDR memory-model BRESP error-injection setting
+    rand bit error_inject;
+
     // Test-scenario name for each Sequence
     string scenario_name;
 
@@ -33,6 +39,8 @@ class dma_tx extends uvm_sequence_item;
         `uvm_field_int(enable, UVM_DEFAULT | UVM_BIN)
         `uvm_field_int(start, UVM_DEFAULT | UVM_BIN)
         `uvm_field_int(irq, UVM_DEFAULT | UVM_BIN)
+        `uvm_field_int(backpressure_prob, UVM_DEFAULT | UVM_DEC)
+        `uvm_field_int(error_inject, UVM_DEFAULT | UVM_BIN)
         `uvm_field_array_int(data_payload, UVM_DEFAULT)
         `uvm_field_string(scenario_name, UVM_DEFAULT)
     `uvm_object_utils_end
@@ -51,6 +59,17 @@ class dma_tx extends uvm_sequence_item;
         soft enable == 1'b1;
         soft start  == 1'b1;
         soft irq    == 1'b1;
+    }
+
+    // [Backpressure constraint] : Default to no stall and limit the maximum to 99%
+    constraint c_backpressure {
+        backpressure_prob inside {[0:99]};
+        soft backpressure_prob == 0;
+    }
+
+    // [Error-injection constraint] : Do not inject BRESP errors in normal transfers
+    constraint c_error_injection {
+        soft error_inject == 1'b0;
     }
 
     // [Memory constraint] : Keep source/destination transfer regions within the 4 KB memory
@@ -86,7 +105,9 @@ class dma_tx extends uvm_sequence_item;
         s = {s, $sformatf("size:%0d, ", size)};
         s = {s, $sformatf("enable:%0b, ", enable)};
         s = {s, $sformatf("start:%0b, ", start)};
-        s = {s, $sformatf("irq:%0b]", irq)};
+        s = {s, $sformatf("irq:%0b, ", irq)};
+        s = {s, $sformatf("backpressure_prob:%0d%%, ", backpressure_prob)};
+        s = {s, $sformatf("error_inject:%0b]", error_inject)};
 
         return s;
     endfunction

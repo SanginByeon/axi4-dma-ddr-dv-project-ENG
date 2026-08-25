@@ -2,6 +2,7 @@
 // dma_driver.sv - DMA UVM Driver
 //
 // - Receives DMA transactions from the Sequence and writes their settings to MMIO registers.
+// - Passes per-transaction backpressure and BRESP error-injection settings to the DDR memory model.
 // - Waits for DMA completion or error, checks STATUS, and logs BYTES_DONE.
 // - Calls MMIO tasks through utility_pkg.
 // ============================================================================
@@ -22,6 +23,7 @@ class dma_driver extends uvm_driver #(dma_tx);
     dma_tx req;
     virtual mmio_if.tb_mp mif;
     virtual axi4_if aif;
+    virtual ddr_model_if dif;
 
     function new(input string name = "dma_driver", uvm_component parent = null);
         super.new(name, parent);
@@ -36,6 +38,8 @@ class dma_driver extends uvm_driver #(dma_tx);
         mif.dma_reg_write <= 1'b0;
         mif.dma_reg_addr  <= '0;
         mif.dma_reg_wdata <= '0;
+        dif.backpressure_prob <= '0;
+        dif.error_inject <= 1'b0;
 
         wait (aif.aresetn == 1'b1); // Wait for reset deassertion
 
@@ -57,12 +61,18 @@ class dma_driver extends uvm_driver #(dma_tx);
 
         if (!uvm_config_db #(virtual axi4_if)::get(this, "", "aif", aif))
             `uvm_fatal("DRV", "Unable to get aif from uvm_config_db");
+
+        if (!uvm_config_db #(virtual ddr_model_if)::get(this, "", "dif", dif))
+            `uvm_fatal("DRV", "Unable to get dif from uvm_config_db");
     endfunction
 
     // [run_phase] : Convert sequence items into MMIO stimulus and drive the DUT
     virtual task run_phase(uvm_phase phase);
         bit [31:0] ctrl_reg_value;
         bit [31:0] status;
+        int timeout_cycles;
+        int word_count;
+        int stall_wait_budget;
 
         super.run_phase(phase);
 
@@ -73,6 +83,10 @@ class dma_driver extends uvm_driver #(dma_tx);
             // Receive a transaction from the Sequencer and start MMIO stimulus
             seq_item_port.get_next_item(req);
             `uvm_info("DRV", $sformatf("Start %s", req.convert2string()), UVM_MEDIUM)
+
+            // Apply DDR memory-model backpressure and BRESP-error settings before configuring the DMA
+            dif.backpressure_prob <= req.backpressure_prob;
+            dif.error_inject <= req.error_inject;
 
             // Configure source/destination addresses and transfer size before starting the DMA
             write_dma_reg(DMA_SRC_ADDR_REG, req.src_addr); // SRC_ADDR
@@ -91,8 +105,13 @@ class dma_driver extends uvm_driver #(dma_tx);
             write_dma_reg(DMA_CTRL_REG, ctrl_reg_value); // CTRL: enable/start/irq
 
             // Wait for the interrupt first, then use STATUS polling as an auxiliary termination check
-            wait_dma_completion(1000); // Detect interrupt, error, or timeout
-            wait_done_via_status();    // Secondary check (STATUS polling)
+            // Allow normal stall latency based on transfer size and backpressure probability
+            word_count = (req.size + 3) / 4;
+            // Apply 4× margin to the average W-handshake wait of 100/(100-p)
+            stall_wait_budget = 400 / (100 - req.backpressure_prob);
+            timeout_cycles = 500 + (word_count * (8 + stall_wait_budget));
+            wait_dma_completion(timeout_cycles); // Capture interrupt/error/timeout
+            wait_done_via_status();               // Auxiliary check (STATUS polling)
 
             // Evaluate each transaction from the STATUS error/done bits
             read_dma_reg(DMA_STAT_REG, status); // Read STATUS
@@ -107,6 +126,10 @@ class dma_driver extends uvm_driver #(dma_tx);
             // Read and log the number of bytes received on the AXI read channel
             read_dma_reg(DMA_BYTES_DONE_REG, status); // BYTES_TRANSFERRED
             `uvm_info("DRV", $sformatf("Bytes transferred: %0d", status), UVM_HIGH)
+
+            // Restore settings so backpressure/error injection does not leak into the next transaction
+            dif.backpressure_prob <= '0;
+            dif.error_inject <= 1'b0;
 
             // Complete the current transaction and allow the next item request
             seq_item_port.item_done();

@@ -4,11 +4,16 @@
 // - Verification memory model that responds to DMA-controller AXI4 read/write requests.
 // - Provides 1,024 x 32-bit memory and fixed read latency.
 // - Removes the previous memory-pattern initialization for UVM; sequences preload source data.
+// - Generates random AXI4 W-channel backpressure according to the configured probability.
+// - Returns SLVERR through BRESP after a write burst according to configuration.
 // - Does not model actual DDR-controller or PHY behavior.
 // - Renames the baseline ddr_controller for its role and separates it into its own file.
 // ============================================================================
 
-module ddr_memory_model (axi4_if.slave axi); 	// Uses the interface as a slave
+module ddr_memory_model (
+	axi4_if.slave axi, 	// AXI4 Slave interface
+	ddr_model_if ddr_cfg	// DDR memory-model verification-condition control
+);
 	logic [31:0] mem [0:1023]; 				// 4 KB memory model (word array)
   
 	localparam int R_LAT = 3; 				// Initial read-latency cycles
@@ -28,6 +33,10 @@ module ddr_memory_model (axi4_if.slave axi); 	// Uses the interface as a slave
 	logic bvalid_reg; 						// Internal BRESP valid
 	logic [1:0] bresp_reg; 					// Internal BRESP code
 	logic [3:0] bid_reg; 					// Internal BRESP ID
+
+	logic force_stall; 						// Deassert WREADY when 1
+	logic [7:0] active_backpressure_prob; 	// Backpressure probability for the current write burst
+	logic active_error_inject; 				// BRESP error-injection setting for the current write burst
   
 	logic r_valid_now; 						// Whether to generate rvalid this cycle
 	logic r_fire; 							// rvalid & rready handshake
@@ -36,10 +45,43 @@ module ddr_memory_model (axi4_if.slave axi); 	// Uses the interface as a slave
 	assign axi.bresp = bresp_reg; 			// Connect write-response code
 	assign axi.bid = bid_reg; 				// Connect write-response ID
   
-  	assign axi.arready = (!rd_active); 					// Accept AR while read-idle
+	assign axi.arready = (!rd_active); 					// Accept AR while read-idle
 	assign axi.awready = (!wr_active) && !bvalid_reg; 	// Accept AW while write-idle with no response pending
-	assign axi.wready = wr_active; 						// Accept data only while write is active
-  
+	assign axi.wready = wr_active && !force_stall; 		// Accept W data only when no random stall is active
+
+	// [W-channel backpressure] : Latch probability at AW and decide random stall each write-burst cycle
+	always_ff @(posedge axi.aclk or negedge axi.aresetn) begin
+		if (!axi.aresetn) begin
+			force_stall <= 1'b0;
+			active_backpressure_prob <= '0;
+			active_error_inject <= 1'b0;
+		end else if (axi.awvalid && axi.awready) begin
+			// Apply the same backpressure and BRESP settings throughout this write burst
+			active_backpressure_prob <= ddr_cfg.backpressure_prob;
+			active_error_inject <= ddr_cfg.error_inject;
+
+			// Decide whether to stall the first W beat
+			if (ddr_cfg.backpressure_prob == 0)
+				force_stall <= 1'b0;
+			else
+				force_stall <=
+					($urandom_range(0, 99) < ddr_cfg.backpressure_prob);
+		end else if (wr_active) begin
+			// Independently decide whether to stall on every cycle of the write burst
+			if (active_backpressure_prob == 0)
+				force_stall <= 1'b0;
+			else
+				force_stall <=
+					($urandom_range(0, 99) < active_backpressure_prob);
+		end else begin
+			force_stall <= 1'b0;
+
+			// Clear the previous write burst's error-injection setting before the next burst
+			if (bvalid_reg && axi.bready)
+				active_error_inject <= 1'b0;
+		end
+	end
+
 	always_ff @(posedge axi.aclk or negedge axi.aresetn) begin // Clock/reset
       	if (!axi.aresetn) begin 				// Asynchronous reset
 			rd_active <= 1'b0; rd_addr <= '0; rd_len <= '0; rd_cnt <= '0; rd_lat <= '0; rd_id_reg <= '0; // Initialize RD
@@ -97,7 +139,13 @@ module ddr_memory_model (axi4_if.slave axi); 	// Uses the interface as a slave
             	if (axi.wlast || (wr_cnt==wr_len)) begin	 // Detect final beat
 					wr_active <= 1'b0;						 // End write
 					bvalid_reg <= 1'b1;						 // Prepare BRESP
-					bresp_reg <= 2'b00;						 // OKAY
+
+					// Select write response from the setting latched at the AW handshake
+					if (active_error_inject)
+						bresp_reg <= 2'b10;					 // SLVERR
+					else
+						bresp_reg <= 2'b00;					 // OKAY
+
 					bid_reg <= wr_id_reg;					 // Response ID
 				end
 				wr_cnt <= wr_cnt + 1;						 // Increment received count

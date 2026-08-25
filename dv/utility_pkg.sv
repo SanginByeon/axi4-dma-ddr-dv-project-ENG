@@ -6,6 +6,7 @@
 // - Checks the 4 KB memory range and treats backdoor-access failure as UVM fatal.
 // - Preserves Step 1 MMIO access timing and controls progress logs through UVM verbosity.
 // - Declares utility tasks/functions automatic for reentrancy.
+// - Treats either done or error as DMA termination during STATUS polling.
 // ============================================================================
 
 package utility_pkg;
@@ -89,19 +90,18 @@ package utility_pkg;
         disable fork;  // Terminate remaining threads to prevent resource leakage
     endtask
 
-    // [STATUS polling]: secondary completion check when an interrupt is absent or missed
+    // [STATUS polling] : Auxiliary normal/error termination check when an interrupt is absent or missed
     task automatic wait_done_via_status(input int max_tries = 20);
         int i;
         logic [31:0] s;
 
         for (i = 0; i < max_tries; i++) begin
             read_dma_reg(8'h04, s);  // STATUS(0x04)
-            if (s[1]) return;        // Return immediately when the done bit is 1
+            if (s[1] || s[2]) return; // Return immediately when either done or error is 1
             @(posedge mif.clk);      // Wait one clock before the next poll
         end
 
-        // Treat as an informational log because done=0 may be valid on the error-interrupt path
-        `uvm_info("DMA_WAIT", "STATUS polling timeout (done=0)", UVM_MEDIUM)
+        `uvm_info("DMA_WAIT", "STATUS polling timeout (done=0, error=0)", UVM_MEDIUM)
     endtask
 
     // [Source-memory preload] : Inject data_payload in 32-bit words starting at src_addr

@@ -1,7 +1,7 @@
 // ============================================================================
 // dma_test.sv - DMA UVM Test
 //
-// - Sequentially runs normal-transfer scenario sequences in the DMA UVM environment after reset deassertion.
+// - Sequentially runs the reference transfer, backpressure, and BRESP error-injection scenarios after reset deassertion.
 // - Passes Agent mode and expected transaction count to the environment through config_db.
 // - Sets verbosity for the complete UVM hierarchy in the end_of_elaboration phase.
 // - Collects functional coverage and prints coverage and performance summaries in the report phase.
@@ -59,7 +59,7 @@ class dma_test extends uvm_test;
         uvm_top.set_report_verbosity_level_hier(UVM_FULL);
     endfunction
 
-    // [run_phase]: sequentially runs normal-transfer scenarios after reset deassertion
+    // [run_phase]: runs the reference transfer, backpressure, and BRESP error-injection scenarios after reset deassertion
     virtual task run_phase(uvm_phase phase);
         phase.raise_objection(this);
 

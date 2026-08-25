@@ -1,7 +1,7 @@
 // ============================================================================
 // dma_monitor.sv - DMA UVM Monitor
 //
-// - Observes MMIO register writes to collect DMA transaction information.
+// - Collects transactions by observing MMIO writes and DDR-model backpressure/error settings.
 // - Forwards the collected transaction to the Scoreboard on a DMA completion or error interrupt.
 // ============================================================================
 
@@ -18,13 +18,14 @@ class dma_monitor extends uvm_monitor;
 
     virtual mmio_if.tb_mp mif;
     virtual axi4_if aif;
+    virtual ddr_model_if dif;
 
     function new(input string name = "dma_monitor", uvm_component parent = null);
         super.new(name, parent);
         send = new("send", this);
     endfunction
 
-    // [build_phase]: prepares MMIO/AXI virtual interfaces
+    // [build_phase] : Prepare MMIO/AXI/DDR-model virtual interfaces
     virtual function void build_phase(uvm_phase phase);
         super.build_phase(phase);
 
@@ -33,9 +34,12 @@ class dma_monitor extends uvm_monitor;
 
         if (!uvm_config_db #(virtual axi4_if)::get(this, "", "aif", aif))
             `uvm_fatal("MON", "Unable to get aif from uvm_config_db");
+
+        if (!uvm_config_db #(virtual ddr_model_if)::get(this, "", "dif", dif))
+            `uvm_fatal("MON", "Unable to get dif from uvm_config_db");
     endfunction
 
-    // [run_phase]: reconstructs transactions by observing MMIO writes and the completion interrupt
+    // [run_phase] : Reconstruct transactions by observing MMIO writes and completion/error interrupts
     virtual task run_phase(uvm_phase phase);
         dma_tx t;
 
@@ -59,6 +63,10 @@ class dma_monitor extends uvm_monitor;
                         t.enable = mif.dma_reg_wdata[0];
                         t.start  = mif.dma_reg_wdata[1];
                         t.irq    = mif.dma_reg_wdata[2];
+
+                        // Capture verification conditions applied to the DDR memory model at DMA start
+                        t.backpressure_prob = dif.backpressure_prob;
+                        t.error_inject = dif.error_inject;
 
                         // When start is set, wait for DMA completion/error and forward the transaction
                         if (t.start) begin

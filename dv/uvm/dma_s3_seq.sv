@@ -1,8 +1,8 @@
 // ============================================================================
 // dma_s3_seq.sv - DMA Scenario 3 Sequences
 //
-// - Performs 16-byte and 64-byte small copies using 4-byte-aligned addresses.
-// - Generates transactions for checking burst length and handshake behavior on small transfers.
+// - Applies 90% backpressure to a 16-byte transfer to create strong W-channel stalls.
+// - Injects BRESP SLVERR alone into a 64-byte transfer to check the error-response path.
 // ============================================================================
 
 import utility_pkg::*;
@@ -14,7 +14,7 @@ class dma_s3_1_seq extends dma_base_seq;
         super.new(name);
     endfunction
 
-    // [body]: generates a 16-byte small-copy transaction and initializes source memory
+    // [body]: generates a 16-byte small-copy transaction with 90% backpressure
     virtual task body();
         dma_tx t;
 
@@ -31,12 +31,16 @@ class dma_s3_1_seq extends dma_base_seq;
             enable == 1'b1;
             start  == 1'b1;
             irq    == 1'b1;
+
+            // DDR memory-model verification controls
+            backpressure_prob == 90;
+            error_inject      == 1'b0;
         }) begin
             `uvm_fatal("S3_1_SEQ", "Failed to randomize dma_tx in dma_s3_1_seq")
         end
 
         // Set scenario name
-        t.scenario_name = "16B Small transfer (S3_1)";
+        t.scenario_name = "16B Transfer with 90% Backpressure (S3_1)";
 
         // Initialize source memory with the 32'hCAFE_0000-based pattern
         preload_src_mem(t.src_addr, t.data_payload);
@@ -58,7 +62,7 @@ class dma_s3_2_seq extends dma_base_seq;
         super.new(name);
     endfunction
 
-    // [body]: generates a 64-byte small-copy transaction and initializes source memory
+    // [body]: generates a 64-byte copy transaction with BRESP SLVERR injection
     virtual task body();
         dma_tx t;
 
@@ -75,12 +79,16 @@ class dma_s3_2_seq extends dma_base_seq;
             enable == 1'b1;
             start  == 1'b1;
             irq    == 1'b1;
+
+            // DDR memory-model verification controls
+            backpressure_prob == 0;
+            error_inject      == 1'b1;
         }) begin
             `uvm_fatal("S3_2_SEQ", "Failed to randomize dma_tx in dma_s3_2_seq")
         end
 
         // Set scenario name
-        t.scenario_name = "64B Small transfer (S3_2)";
+        t.scenario_name = "64B Transfer with BRESP SLVERR (S3_2)";
 
         // Initialize source memory with the 32'hCAFE_0000-based pattern
         preload_src_mem(t.src_addr, t.data_payload);
