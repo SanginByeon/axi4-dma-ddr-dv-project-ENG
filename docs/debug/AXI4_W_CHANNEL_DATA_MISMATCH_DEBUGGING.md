@@ -57,7 +57,7 @@ The original code updates the W payload whenever `WVALID=1`, regardless of `WREA
 the payload to remain stable while `WVALID=1` and `WREADY=0`, so advancing to the next data before a
 handshake is a protocol violation.
 
-After the fix: [`rtl/dma_controller.sv`](../../rtl/dma_controller.sv#L269)
+After the fix: [`rtl/dma_controller.sv`](../../rtl/dma_controller.sv#L289)
 
 ```systemverilog
 else if (m.wvalid) begin
@@ -85,7 +85,7 @@ condition still prefetches `fifo[4]`. S3-1 updates only `fifo[0:3]`, so `fifo[4]
 `CAFE00F4` from the previous S2 burst. Leaving FIFO storage uncleared is not itself a problem; the
 cause was an access beyond the valid-data range of the current burst.
 
-After the fix: [`rtl/dma_controller.sv`](../../rtl/dma_controller.sv#L285)
+After the fix: [`rtl/dma_controller.sv`](../../rtl/dma_controller.sv#L305)
 
 ```systemverilog
 if ((w_beats_sent + 1) < burst_len_m1)

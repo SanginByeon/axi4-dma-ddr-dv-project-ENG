@@ -4,11 +4,15 @@
 // - Performs memory copies according to MMIO-configured SRC, DST, and SIZE values.
 // - Stores AXI4 read-burst data in an internal FIFO before transmitting it in write bursts.
 // - Provides transfer status and error information through MMIO registers and interrupts.
-// - Extracted from the baseline in Step 1. Step 3 fixes keep the W payload stable during stalls,
-//   limit FIFO prefetch to the current burst, and handle BRESP errors.
+// - Controls internal DUT progress logs through the DEBUG_LOG_ENABLE parameter.
+// - Extracted from the baseline in Step 1. Later fixes keep the W payload stable during stalls,
+//   limit FIFO prefetch to the current burst, handle BRESP errors, and align WLAST with the final
+//   write beat.
 // ============================================================================
 
-module dma_controller (
+module dma_controller #(
+    parameter bit DEBUG_LOG_ENABLE = 1'b0
+) (
   	input logic clk,	// Internal clock
   	input logic resetn, // Internal reset (active-low)
   
@@ -24,7 +28,7 @@ module dma_controller (
   
 	// Interrupts
 	output logic dma_done_int, 			// Completion pulse (when irq_en)
-  	output logic dma_error_int, 		// Asserted while servicing S_ERROR when irq_en
+    output logic dma_error_int,         // Asserted while servicing S_ERROR when irq_en
   
 	// Debug
 	output logic [3:0] dbg_state, 		// FSM-state observation
@@ -106,19 +110,28 @@ module dma_controller (
               	unique case (reg_addr)	   // Decode address
 					8'h00: begin
 						ctrl <= dma_ctrl_t'(reg_wdata); // Update CTRL
-                      	$display("[%0t] DMA: Control register set - enable=%0b, start=%0b", $time, reg_wdata[0], reg_wdata[1]); // Debug log
+						if (DEBUG_LOG_ENABLE)
+							$display("[%0t] DMA: Control register set - enable=%0b, start=%0b", $time, reg_wdata[0], reg_wdata[1]);
 					end
 					8'h08: begin
-                      	src_reg <= reg_wdata;
-                      	$display("[%0t] DMA: Source address set - 0x%08X", $time, reg_wdata);
+						src_reg <= reg_wdata;
+						if (DEBUG_LOG_ENABLE)
+							$display("[%0t] DMA: Source address set - 0x%08X", $time, reg_wdata);
                     end
-                  	8'h0C: begin
-                      	dst_reg <= reg_wdata; $display("[%0t] DMA: Destination address set - 0x%08X", $time, reg_wdata);
+					8'h0C: begin
+						dst_reg <= reg_wdata;
+						if (DEBUG_LOG_ENABLE)
+							$display("[%0t] DMA: Destination address set - 0x%08X", $time, reg_wdata);
                     end
-                  	8'h10: begin
-                      	size_reg <= reg_wdata; $display("[%0t] DMA: Transfer size set - %0d bytes", $time, reg_wdata);
+					8'h10: begin
+						size_reg <= reg_wdata;
+						if (DEBUG_LOG_ENABLE)
+							$display("[%0t] DMA: Transfer size set - %0d bytes", $time, reg_wdata);
                     end
-                  	default: $display("[%0t] DMA: Invalid register address access - 0x%02X", $time, reg_addr);
+					default: begin
+						if (DEBUG_LOG_ENABLE)
+							$display("[%0t] DMA: Invalid register address access - 0x%02X", $time, reg_addr);
+					end
 				endcase
 			end
 		end
@@ -174,10 +187,11 @@ module dma_controller (
 			m.arvalid <= 1'b0; 	   // Address valid is 1 only in its state
 			// Control m.wvalid/m.wdata/m.wlast only in S_WR_DATA
 			
-          	if (reg_write && (reg_addr==8'h00) && reg_wdata[1]) begin // When writing CTRL.start=1
+			if (reg_write && (reg_addr==8'h00) && reg_wdata[1]) begin // When writing CTRL.start=1
 				start_active <= 1'b1;  	// Set start latch
 				setup_complete <= 1'b0; // Prepare new transfer
-				$display("[%0t] DMA: start_active set to 1", $time);
+				if (DEBUG_LOG_ENABLE)
+					$display("[%0t] DMA: start_active set to 1", $time);
 			end
           
 			unique case (cur)
@@ -195,7 +209,8 @@ module dma_controller (
                       	stat.done <= 1'b0;		 // Clear done
                       	stat.error <= 1'b0;		 // Clear error
                       	stat.error_code <= 4'h0; // Initialize error code
-                      	$display("[%0t] DMA: NEW TRANSFER STARTED - 0x%08X -> 0x%08X (%0d bytes)", $time, src_reg, dst_reg, size_reg);
+						if (DEBUG_LOG_ENABLE)
+							$display("[%0t] DMA: NEW TRANSFER STARTED - 0x%08X -> 0x%08X (%0d bytes)", $time, src_reg, dst_reg, size_reg);
                     end
 				end
               
@@ -203,23 +218,29 @@ module dma_controller (
 					start_active <= 1'b0;		// Consume start pulse
                   if (!setup_complete) begin 	// Run once only
                       	setup_complete <= 1'b1; // Prevent rerun
-                    	$display("[%0t] DMA: SETUP EXECUTING - bytes_left=%0d, src=0x%08X, dst=0x%08X", $time, bytes_left, cur_src, cur_dst);
+					if (DEBUG_LOG_ENABLE)
+						$display("[%0t] DMA: SETUP EXECUTING - bytes_left=%0d, src=0x%08X, dst=0x%08X", $time, bytes_left, cur_src, cur_dst);
                     
                     	if (bytes_left == 0) begin 							// Disallow zero-byte transfer
 							stat.error <= 1'b1; stat.error_code <= 4'h2; 	// Size error
-                          	$display("[%0t] DMA: SETUP ERROR - bytes_left is ZERO", $time);
+							if (DEBUG_LOG_ENABLE)
+								$display("[%0t] DMA: SETUP ERROR - bytes_left is ZERO", $time);
 						end else if (bytes_left >= 64) begin
 							burst_len_m1 <= 8'd15; 							// 16 beats (64B)
-                          	$display("[%0t] DMA: SETUP SUCCESS - 16 beats (64 bytes) for %0d bytes_left", $time, bytes_left);
+							if (DEBUG_LOG_ENABLE)
+								$display("[%0t] DMA: SETUP SUCCESS - 16 beats (64 bytes) for %0d bytes_left", $time, bytes_left);
 						end else if (bytes_left >= 16) begin
 							burst_len_m1 <= 8'd3; 							// 4 beats (16B)
-                          	$display("[%0t] DMA: SETUP SUCCESS - 4 beats (16 bytes) for %0d bytes_left", $time, bytes_left);
+							if (DEBUG_LOG_ENABLE)
+								$display("[%0t] DMA: SETUP SUCCESS - 4 beats (16 bytes) for %0d bytes_left", $time, bytes_left);
 						end else if (bytes_left >= 4) begin
 							burst_len_m1 <= 8'd0; 							// 1 beat (4B)
-                          	$display("[%0t] DMA: SETUP SUCCESS - 1 beat (4 bytes) for %0d bytes_left", $time, bytes_left);
+							if (DEBUG_LOG_ENABLE)
+								$display("[%0t] DMA: SETUP SUCCESS - 1 beat (4 bytes) for %0d bytes_left", $time, bytes_left);
 						end else begin 										// Less than 4 bytes is unsupported
 							stat.error <= 1'b1; stat.error_code <= 4'h2;
-                          	$display("[%0t] DMA: SETUP ERROR - bytes_left=%0d < 4", $time, bytes_left);
+							if (DEBUG_LOG_ENABLE)
+								$display("[%0t] DMA: SETUP ERROR - bytes_left=%0d < 4", $time, bytes_left);
 						end
 						r_beats_rcvd <= 0; w_beats_sent <= 0; 				// Reset counters
 					end
@@ -230,7 +251,8 @@ module dma_controller (
 					m.araddr <= cur_src; 			// Start address
 					m.arlen <= burst_len_m1; 		// Length minus 1
 					m.arid <= ctrl.channel_id[3:0]; // Set ID
-                  	$display("[%0t] DMA: READ ADDR - 0x%08X, %0d beats", $time, cur_src, burst_len_m1+1);
+					if (DEBUG_LOG_ENABLE)
+						$display("[%0t] DMA: READ ADDR - 0x%08X, %0d beats", $time, cur_src, burst_len_m1+1);
 				end
              
 				S_RD_DATA: begin
@@ -242,7 +264,8 @@ module dma_controller (
 						cur_src <= cur_src + 4; 			// Increment source address
 						bytes_left <= bytes_left - 4; 		// Decrement remaining bytes
 						bytes_done <= bytes_done + 4; 		// Increment progress bytes
-						$display("[%0t] DMA: READ DATA - 0x%08X (beat %0d/%0d)", $time, m.rdata, r_beats_rcvd+1, burst_len_m1+1);
+						if (DEBUG_LOG_ENABLE)
+							$display("[%0t] DMA: READ DATA - 0x%08X (beat %0d/%0d)", $time, m.rdata, r_beats_rcvd+1, burst_len_m1+1);
 					end
 				end
          
@@ -251,7 +274,8 @@ module dma_controller (
 					m.awaddr <= cur_dst; 			// Start address
 					m.awlen <= burst_len_m1; 		// Length minus 1
 					m.awid <= ctrl.channel_id[3:0]; // Set ID
-                  	$display("[%0t] DMA: WRITE ADDR - 0x%08X, %0d beats", $time, cur_dst, burst_len_m1+1);
+					if (DEBUG_LOG_ENABLE)
+						$display("[%0t] DMA: WRITE ADDR - 0x%08X, %0d beats", $time, cur_dst, burst_len_m1+1);
 				end
          
 				// Write data: first-cycle alignment + one-cycle lookahead prefetch
@@ -265,7 +289,7 @@ module dma_controller (
                   	else if (m.wvalid) begin 						// Transfer in progress
 						if (m.wready) begin 							// Output next beat only on a handshake
 							m.wdata <= wdata_hold; 					// Output held data
-							m.wlast <= (w_beats_sent == burst_len_m1); // Indicates the final beat
+							m.wlast <= ((w_beats_sent + 1) == burst_len_m1); // Whether the next beat is final
 						end
 					end
 					else begin
@@ -283,7 +307,8 @@ module dma_controller (
                       
                       	if (w_beats_sent == burst_len_m1) 	// Immediately after final beat
 							m.wvalid <= 1'b0; 				// Deassert wvalid (move to RESP)
-						$display("[%0t] DMA: WRITE DATA - 0x%08X -> 0x%08X (beat %0d/%0d)", $time, m.wdata, cur_dst, w_beats_sent+1, burst_len_m1+1);
+						if (DEBUG_LOG_ENABLE)
+							$display("[%0t] DMA: WRITE DATA - 0x%08X -> 0x%08X (beat %0d/%0d)", $time, m.wdata, cur_dst, w_beats_sent+1, burst_len_m1+1);
 					end
                 end
 
@@ -293,13 +318,15 @@ module dma_controller (
 						if (m.bresp != 2'b00) begin 	// Error response
 							stat.error <= 1'b1; 		// Set error
 							stat.error_code <= 4'h3; 	// Set code
-                          	$display("[%0t] DMA: WRITE ERROR - BRESP=%b", $time, m.bresp);
+							if (DEBUG_LOG_ENABLE)
+								$display("[%0t] DMA: WRITE ERROR - BRESP=%b", $time, m.bresp);
 						end else begin 					// OKAY response
                           	if (bytes_left == 0) begin 	// When no bytes remain
 								stat.done <= 1'b1; 		// Completion (sticky)
 								stat.busy <= 1'b0; 		// Deassert busy
 							end
-							$display("[%0t] DMA: WRITE COMPLETE - bytes_left=%0d", $time, bytes_left);
+							if (DEBUG_LOG_ENABLE)
+								$display("[%0t] DMA: WRITE COMPLETE - bytes_left=%0d", $time, bytes_left);
 						end
 					end
 				end
@@ -308,21 +335,24 @@ module dma_controller (
 					r_beats_rcvd <= 0; 		// Reset counters
                   	w_beats_sent <= 0; 		// Reset counters
                   	setup_complete <= 1'b0; // Allow next SETUP
-                  	$display("[%0t] DMA: NEXT BURST - %0d bytes remaining", $time, bytes_left);
+					if (DEBUG_LOG_ENABLE)
+						$display("[%0t] DMA: NEXT BURST - %0d bytes remaining", $time, bytes_left);
 				end
               
 				S_DONE: begin
 					stat.busy <= 1'b0; 			 // End operation
                   	stat.done <= 1'b1; 			 // Hold completion
                   	dma_done_int <= ctrl.irq_en; // Pulse when IRQ enabled
-                  	$display("[%0t] DMA: TRANSFER COMPLETED - Total %0d bytes", $time, bytes_done);
+					if (DEBUG_LOG_ENABLE)
+						$display("[%0t] DMA: TRANSFER COMPLETED - Total %0d bytes", $time, bytes_done);
 				end
 
               	S_ERROR: begin
 					stat.busy <= 1'b0; 				// Stop
 					stat.error <= 1'b1; 			// Hold error
-                  	dma_error_int <= ctrl.irq_en; 	// Assert while S_ERROR is serviced and IRQ is enabled
-                  	$display("[%0t] DMA: ERROR STATE - code=0x%0h", $time, stat.error_code);
+                    dma_error_int <= ctrl.irq_en; // Assert while S_ERROR is serviced and IRQ is enabled
+					if (DEBUG_LOG_ENABLE)
+						$display("[%0t] DMA: ERROR STATE - code=0x%0h", $time, stat.error_code);
 				end
               
               	default: ; // Defensive default
@@ -335,13 +365,16 @@ module dma_controller (
 		nxt = cur; // Hold by default
 		unique case (cur)
 			S_IDLE: begin
-            	$display("[%0t] DMA: IDLE check - start_active=%0b, size_reg=%0d", $time, start_active, size_reg);
-              	if (start_active) begin 	// Start command
+				if (DEBUG_LOG_ENABLE)
+					$display("[%0t] DMA: IDLE check - start_active=%0b, size_reg=%0d", $time, start_active, size_reg);
+				if (start_active) begin 	// Start command
 					if (size_reg==0) begin 	// Size 0 → error
-                    	$display("[%0t] DMA: IDLE -> ERROR (size=0)", $time);
+						if (DEBUG_LOG_ENABLE)
+							$display("[%0t] DMA: IDLE -> ERROR (size=0)", $time);
 						nxt = S_ERROR;
 					end else begin 			// Normal → SETUP
-                    	$display("[%0t] DMA: IDLE -> SETUP (size=%0d)", $time, size_reg);
+						if (DEBUG_LOG_ENABLE)
+							$display("[%0t] DMA: IDLE -> SETUP (size=%0d)", $time, size_reg);
 						nxt = S_SETUP;
 					end
 				end

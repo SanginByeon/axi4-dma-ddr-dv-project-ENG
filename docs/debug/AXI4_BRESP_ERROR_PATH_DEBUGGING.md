@@ -2,9 +2,8 @@
 
 ## Overview
 
-In Step 3, the DDR memory model was configured to return `BRESP=SLVERR` to verify the AXI4 write-
-response error path. The DUT recorded `error_code=0x3` but transitioned to the normal-completion state.
-Analysis of the log and FSM code identified and corrected the BRESP error-state transition condition.
+In Step 3, the DDR memory model returned `SLVERR` on the B channel. The log and FSM logic showed why
+the DUT entered `S_DONE`, and I corrected the next-state condition.
 
 ## Reproduction
 
@@ -55,7 +54,7 @@ The `S_WR_RESP` sequential logic sets `stat.error` with a nonblocking assignment
 handshake. At the same time, the next-state combinational logic reads the old `stat.error=0`, so it
 selects the normal-completion path even though the current response is SLVERR.
 
-After the fix: [`rtl/dma_controller.sv`](../../rtl/dma_controller.sv#L373)
+After the fix: [`rtl/dma_controller.sv`](../../rtl/dma_controller.sv#L402)
 
 ```systemverilog
 S_WR_RESP: if (m.bvalid && m.bready) begin
@@ -68,9 +67,8 @@ S_WR_RESP: if (m.bvalid && m.bready) begin
 end
 ```
 
-The next-state logic was changed to inspect the current handshake's `BRESP` directly. `stat.error` and
-`stat.error_code` continue to be recorded by the existing sequential logic so that the error state
-remains observable through MMIO STATUS.
+The next-state decision now checks `BRESP` directly at the current handshake. Existing sequential
+logic continues to record `stat.error` and `stat.error_code`, preserving MMIO STATUS visibility.
 
 ## Fix and Re-Verification Results
 

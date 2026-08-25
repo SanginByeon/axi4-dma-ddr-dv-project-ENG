@@ -3,9 +3,10 @@
 //
 // - Connects the DMA controller, DDR memory model, and AXI4/MMIO/DDR-model interfaces.
 // - Passes virtual interfaces to the UVM environment and runs dma_test.
-// - Runs baseline-transfer, W-channel backpressure, and BRESP error-injection scenarios.
+// - Runs normal boundary-value, error, backpressure, and constrained-random scenarios.
 // - Verifies complete transfer-region data integrity with a transaction-based Scoreboard.
-// - Reports functional coverage and performance results in the UVM report phase.
+// - Verifies backpressure signal stability and WLAST timing on the AXI4 W channel with assertions.
+// - Reports transaction/FSM/AXI-event functional coverage and performance results in the UVM report phase.
 // - Provides verbosity-controlled UVM logs for DMA states and AXI activity.
 // ============================================================================
 
@@ -19,12 +20,17 @@ import uvm_pkg::*;
 import utility_pkg::*;
 
 `include "coverage.sv"
+`include "axi_checker.sv"
 
 `include "dma_tx.sv"
 `include "dma_base_seq.sv"
-`include "dma_s1_seq.sv"
-`include "dma_s2_seq.sv"
-`include "dma_s3_seq.sv"
+`include "dma_s1_boundary_seq.sv"
+`include "dma_s2_size_error_seq.sv"
+`include "dma_s3_backpressure_seq.sv"
+`include "dma_s4_slverr_seq.sv"
+`include "dma_s5_backpressure_slverr_seq.sv"
+`include "dma_s6_error_recovery_seq.sv"
+`include "dma_s7_random_seq.sv"
 `include "dma_driver.sv"
 `include "dma_monitor.sv"
 `include "dma_scoreboard.sv"
@@ -69,7 +75,9 @@ module tb;
     );
 
     // [DMA controller] : Accesses memory as an AXI master
-    dma_controller dma_ctrl (
+    dma_controller #(
+        .DEBUG_LOG_ENABLE (1'b0)
+    ) dma_ctrl (
         .clk (clk),
         .resetn (resetn),
 
@@ -87,6 +95,12 @@ module tb;
         .dbg_state (dbg_state),
         .dbg_burst_len (dbg_burst_len),
         .dbg_buf_count (dbg_buf_count)
+    );
+
+    // [AXI4 W checker] : Check signal stability under backpressure and final-beat WLAST timing
+    axi_checker axi_w_checker (
+        .axi          (memory_axi),
+        .w_beats_sent (dma_ctrl.w_beats_sent)
     );
 
     // [UVM start]: passes the physical interfaces as virtual interfaces, then runs the test
