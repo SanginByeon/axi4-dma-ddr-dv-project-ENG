@@ -1,4 +1,4 @@
-# AXI4 W Channel Assertion Set
+# AXI4 W-Channel Assertion Set
 
 ## 1. Overview
 
@@ -29,8 +29,8 @@ handshake. It therefore detects both a missing WLAST on the final beat and an in
 WLAST before the final beat with a single property.
 
 When an assertion fails, it raises `$error` and increments both the corresponding violation counter
-increments `vio_total`. The `dma_test` report phase prints the occurrence count for each assertion and the final
-PASS/FAIL result.
+and the aggregate `vio_total` counter. The report phases of `dma_test` and `dma_regression_test` print
+the count for each assertion and the final PASS/FAIL result.
 
 ## 4. Pass Criteria
 

@@ -2,11 +2,11 @@
 // testbench.sv - DMA-DDR UVM Testbench Top
 //
 // - Connects the DMA controller, DDR memory model, and AXI4/MMIO/DDR-model interfaces.
-// - Passes virtual interfaces to the UVM environment and runs dma_test.
-// - Runs normal boundary-value, error, backpressure, and constrained-random scenarios.
+// - Passes virtual interfaces to the UVM environment and runs the selected UVM test.
+// - Supports Step 4 comprehensive verification or Step 5 multi-seed backpressure regression.
 // - Verifies complete transfer-region data integrity with a transaction-based Scoreboard.
 // - Verifies backpressure signal stability and WLAST timing on the AXI4 W channel with assertions.
-// - Reports transaction/FSM/AXI-event functional coverage and performance results in the UVM report phase.
+// - Reports functional coverage and performance in the UVM report phase of the Step 4 dma_test.
 // - Provides verbosity-controlled UVM logs for DMA states and AXI activity.
 // ============================================================================
 
@@ -31,12 +31,14 @@ import utility_pkg::*;
 `include "dma_s5_backpressure_slverr_seq.sv"
 `include "dma_s6_error_recovery_seq.sv"
 `include "dma_s7_random_seq.sv"
+`include "dma_regression_seq.sv"
 `include "dma_driver.sv"
 `include "dma_monitor.sv"
 `include "dma_scoreboard.sv"
 `include "dma_agent.sv"
 `include "dma_env.sv"
 `include "dma_test.sv"
+`include "dma_regression_test.sv"
 
 module tb;
 
@@ -103,8 +105,10 @@ module tb;
         .w_beats_sent (dma_ctrl.w_beats_sent)
     );
 
-    // [UVM start]: passes the physical interfaces as virtual interfaces, then runs the test
+    // [UVM startup] : Pass actual interfaces and select the UVM test from the run option
     initial begin
+        string selected_test_name;
+
         uvm_config_db #(virtual mmio_if.tb_mp)::set(
             null, "*", "mif", mmio.tb_mp
         );
@@ -115,7 +119,16 @@ module tb;
             null, "*", "dif", ddr_model_ctrl
         );
 
-        run_test("dma_test");
+        // Run the existing Step 4 dma_test by default when +UVM_TESTNAME is absent
+        if ($value$plusargs("UVM_TESTNAME=%s", selected_test_name)) begin
+            `uvm_info(
+                "TB",
+                $sformatf("Selected UVM test: %s", selected_test_name),
+                UVM_LOW
+            )
+            run_test();
+        end else
+            run_test("dma_test");
     end
 
     // [Simulation observation] : Dump waveforms and print startup information

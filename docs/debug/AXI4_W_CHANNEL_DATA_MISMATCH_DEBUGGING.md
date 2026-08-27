@@ -8,8 +8,7 @@ WDATA-update condition and FIFO-prefetch condition.
 
 ## Reproduction
 
-S1 passed without backpressure, but S2 and S3-1, which introduced probabilistic backpressure,
-produced data mismatches.
+S1 passed without backpressure, but probabilistic backpressure caused data mismatches in S2 and S3-1.
 
 | Scenario | Backpressure Probability | Result Before Fix |
 |---|---:|---:|
@@ -25,13 +24,14 @@ The S3-1 source-read data was correct from `CAFE0000` through `CAFE0003`, but th
 showed `CAFE00F4`, data from the previous burst.
 
 ```text
-Expected: CAFE0000 → CAFE0001 → CAFE0002 → CAFE0003
-Actual:   CAFE0000 → CAFE0001 → CAFE0002 → CAFE0003 → CAFE00F4
+Expected accepted beats:     CAFE0000 → CAFE0001 → CAFE0002 → CAFE0003
+Values observed on WDATA:    CAFE0000 → CAFE0001 → CAFE0002 → CAFE0003 → CAFE00F4
+Beats accepted at handshakes: CAFE0001 → CAFE0002 → CAFE0003 → CAFE00F4
 ```
 
 Backpressure repeats while `WVALID=1` in the waveform. No handshake occurs in any `WREADY=0`,
 `w_fire=0` interval, so `WDATA` should remain stable. Instead, it continues to update from
-`CAFE0000 → CAFE0001`, `CAFE0001 → CAFE0002`, `CAFE0002 → CAFE0003`,
+`CAFE0000 → CAFE0001`, `CAFE0001 → CAFE0002`, `CAFE0002 → CAFE0003`, and
 `CAFE0003 → CAFE00F4`.
 
 Each data change during a stall violates the AXI4 payload-stability requirement. At the following
@@ -58,6 +58,9 @@ the payload to remain stable while `WVALID=1` and `WREADY=0`, so advancing to th
 handshake is a protocol violation.
 
 After the fix: [`rtl/dma_controller.sv`](../../rtl/dma_controller.sv#L289)
+
+(The following code reflects only the Step 3 W-payload update-condition fix, before the Step 4 WLAST-
+timing fix was applied.)
 
 ```systemverilog
 else if (m.wvalid) begin
@@ -108,9 +111,8 @@ on `WDATA` after the final handshake; because `WVALID=0`, it is not actually tra
 
 ### After Also Fixing the FIFO-Prefetch Range
 
-After the FIFO prefetch-range bug was fixed, the final `WDATA` remained at `CAFE0003`.
-The rerun log records Scoreboard PASS for all four transactions, matching all 340 words, and confirms
-the four expected transactions.
+After the FIFO-prefetch range bug is fixed, the final `WDATA` remains `CAFE0003`. The rerun log records
+Scoreboard PASS for all four transactions, 340 matching words, and four expected transactions.
 
 - Waveform: [`axi_w_payload_prefetch_fixed.png`](../images/step3/axi_w_payload_prefetch_fixed.png)
 
