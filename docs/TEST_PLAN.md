@@ -2,8 +2,9 @@
 
 ## 1. Overview
 
-This document defines the stimulus values for the seven sequences and 37 total transactions executed in Step 4.
-Verification objectives and result criteria are defined in [`VERIFICATION_PLAN.md`](./VERIFICATION_PLAN.md), coverage goals in
+This document defines the stimulus values for the seven sequences and 37 transactions executed in
+Step 4. Verification objectives and result evaluation are defined in
+[`VERIFICATION_PLAN.md`](./VERIFICATION_PLAN.md), coverage goals in
 [`COVERAGE_PLAN.md`](./COVERAGE_PLAN.md), and assertion items in
 [`ASSERTION_SET.md`](./ASSERTION_SET.md).
 
@@ -47,7 +48,7 @@ Verification objectives and result criteria are defined in [`VERIFICATION_PLAN.m
 | S1-10 | 1,028 | `0x0000` | `0x0800` | 0% | 0 | Normal completion, multi-burst and 1-beat tail |
 | S1-11 | 2,048 | `0x0000` | `0x0800` | 0% | 0 | Normal completion, maximum non-overlapping transfer |
 
-### 4.2 S2: Size error
+### 4.2 S2: Size Error
 
 | Test ID | Size (B) | Source | Destination | Backpressure | Error Inject | Expected Result |
 |---|---:|---:|---:|---:|---:|---|
@@ -56,7 +57,7 @@ Verification objectives and result criteria are defined in [`VERIFICATION_PLAN.m
 | S2-3 | 3 | `0x0C40` | `0x0040` | 0% | 0 | `error_code=0x2`, error interrupt |
 | S2-4 | 15 | `0x0180` | `0x0680` | 0% | 0 | Process 12B, then `error_code=0x2` on the remaining 3B |
 
-### 4.3 S3: W channel backpressure
+### 4.3 S3: W-Channel Backpressure
 
 | Test ID | Size (B) | Source | Destination | Backpressure | Error Inject | Expected Result |
 |---|---:|---:|---:|---:|---:|---|
@@ -95,19 +96,20 @@ Verification objectives and result criteria are defined in [`VERIFICATION_PLAN.m
 
 ## 5. Constrained-Random Test Matrix
 
-S7 generates five transactions under the same constraints. Because the directed tests cover the main
-boundary values and coverage combinations, S7 serves as a supplemental test of constrained-random
-generation and random normal transfers. Five iterations do not claim statistical random-regression
-or coverage-closure sufficiency.
+S7 adds five constrained-random transfers to the directed tests. The directed tests cover the planned
+boundaries and bin combinations. S7 supplements them with random normal transfers; it is not the
+primary means of statistical random regression or coverage closure.
 
-The values below are not fixed before execution; the generated values are recorded in the S7 transactions in the simulation log.
+The values below are not fixed before execution; the generated values are recorded in each S7
+transaction in the simulation log.
 
 | Test ID | Size | Source/Destination | Backpressure | Error Inject | Expected Result |
 |---|---|---|---|---:|---|
 | S7-1–S7-5 | 4–256B, divisible by 4 | 4-byte aligned, inside 4 KB, non-overlapping | 1–99% | 0 | Normal completion, matching data |
 
-Weights distribute source and destination start addresses across the low/mid/high memory regions,
-and apply equal weights to the low (1-30%), medium (31-70%), and high (71-99%) backpressure ranges.
+Weighted distributions spread source and destination start addresses across low, middle, and high
+memory regions and apply equal weight to the low (1–30%), medium (31–70%), and high (71–99%)
+backpressure ranges.
 
 ## 6. Expected UVM Errors
 
@@ -116,8 +118,8 @@ transactions also raise `UVM_ERROR`.
 
 | Error Condition | Transactions | UVM Errors per Transaction | Total |
 |---|---|---:|---:|
-| Size error | S2-1~S2-4, S6-1 | Driver 1 + Scoreboard 2 | 15 |
-| BRESP SLVERR | S4-1, S5-1~S5-3, S6-3 | Driver 1 | 5 |
+| Size error | S2-1–S2-4, S6-1 | Driver 1 + Scoreboard 2 | 15 |
+| BRESP SLVERR | S4-1, S5-1–S5-3, S6-3 | Driver 1 | 5 |
 | Total | 10 negative transactions |  | **20** |
 
 The fixed Step 4 test matrix sets `EXPECTED_UVM_ERROR_COUNT=20`. If the number of scenarios or the
